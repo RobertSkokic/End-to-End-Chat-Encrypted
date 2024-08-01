@@ -1,0 +1,74 @@
+﻿<div id="chat" style="display: none;">
+    <input type="hidden" id="userId" value="@Context.Session.GetInt32("UserId")" />
+    <input type="hidden" id="username" value="@Context.Session.GetString("Username")" /> <!-- Add this line to get the username -->
+    <select id="recipientSelect">
+        <option value="">Select a user to chat with</option>
+    </select>
+    <input type="text" id="messageInput" placeholder="Type a message" />
+    <button id="sendButton">Send</button>
+
+    <ul id="messagesList"></ul>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/3.1.11/signalr.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.9-1/crypto-js.js"></script>
+<script>
+    const key = CryptoJS.enc.Hex.parse('80E16E0CFB4CD38D6342E98DF80AB40F');
+    const iv = CryptoJS.enc.Hex.parse('A967933D0A18D24A632513C0A4FECFA8');
+
+    const userId = document.getElementById("userId").value;
+    const username = document.getElementById("username").value; // Get the username
+
+    if (userId) {
+        document.getElementById('chat').style.display = 'block';
+
+        fetch('/api/users')
+            .then(response => response.json())
+            .then(data => {
+                const recipientSelect = document.getElementById('recipientSelect');
+                data.forEach(user => {
+                    if (user.chatuserid !== parseInt(userId)) {  // Exclude self
+                        const option = document.createElement('option');
+                        option.value = user.chatuserid;
+                        option.textContent = user.username;
+                        recipientSelect.appendChild(option);
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Error fetching users:', error);
+            });
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/chatHub")
+            .build();
+
+        connection.on("ReceiveMessage", function (senderUsername, encryptedMessage) {
+            const decrypted = CryptoJS.AES.decrypt(encryptedMessage, key, { iv: iv });
+            const message = decrypted.toString(CryptoJS.enc.Utf8);
+            const msg = document.createElement('li');
+            msg.textContent = `${senderUsername}: ${message}`; // Use username instead of ID
+            document.getElementById("messagesList").appendChild(msg);
+        });
+
+        document.getElementById("sendButton").addEventListener("click", function (event) {
+            const recipientId = document.getElementById("recipientSelect").value;
+            const message = document.getElementById("messageInput").value;
+
+            if (!recipientId) {
+                alert('Please select a user to chat with.');
+                return;
+            }
+
+            const encrypted = CryptoJS.AES.encrypt(message, key, { iv: iv }).toString();
+            connection.invoke("SendMessage", username, parseInt(recipientId), encrypted).catch(function (err) {
+                return console.error(err.toString());
+            });
+            event.preventDefault();
+        });
+
+        connection.start().catch(function (err) {
+            return console.error(err.toString());
+        });
+    }
+</script>
